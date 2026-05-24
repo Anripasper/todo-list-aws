@@ -16,3 +16,14 @@ A continuación se describe la estructura del proyecto:
 aws cloudformation describe-stacks --stack-name todo-list-aws-production --query 'Stacks[0].Outputs[?OutputKey==`BaseUrlApi`].OutputValue' --region us-east-1 --output text
 
 
+## Limpieza
+
+Para borrar la apliación y eliminar los stacks creados ejecutar los siguientes comandos:
+
+```bash
+aws cloudformation delete-stack --stack-name todo-list-aws-staging
+aws cloudformation delete-stack --stack-name todo-list-aws-production
+```
+
+probar reto1
+
