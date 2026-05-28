@@ -1,0 +1,187 @@
+pipeline {
+    agent any
+    stages {
+
+        stage('Get Code') {
+        agent { label 'agente1' }
+            steps {
+               echo '---- LIMPIEZA----'
+               cleanWs()
+               git branch: 'develop',
+               url: 'https://github.com/Anripasper/todo-list-aws.git',
+               credentialsId: 'GitTOKEN'
+                stash name: 'code', includes:'**'
+
+                }
+            }
+    stage('Set Environment') {
+        agent { label 'agente1' }
+    steps {
+         unstash name: 'code'
+        sh '''
+            echo "==== CREATING VENV ===="
+            python3 -m venv venv
+
+            . venv/bin/activate
+             echo "==== INSTALACIONES ===="
+            pip install --upgrade pip
+            pip install flake8 bandit 
+            pip install pytest requests
+             # Who am I?
+                    whoami
+                    hostname
+        '''
+    }
+}
+
+stage('Static Test') {
+      agent { label 'agente2' }
+    steps {
+        
+          unstash name: 'code'
+        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+        sh '''
+            echo "==== STATIC TEST ===="
+
+            # ACTIVAR EL VENV
+            . venv/bin/activate
+              pip install --upgrade pip
+             pip install flake8 bandit
+
+            export PYTHONPATH=$WORKSPACE
+
+            echo "==== FLAKE8 ===="
+            flake8 --exit-zero --format=pylint src > flake8.out  || true
+             # si no hay errores, crear archivo válido vacío (pero NO vacío de verdad)
+            if [ ! -s flake8.out ]; then
+              echo "" > flake8.out
+              fi
+
+            echo "==== BANDIT ===="
+            bandit --exit-zero -r src \
+                -f json \
+                -o bandit.out 
+            echo "==== CONTENIDO BANDIT ===="
+               cat bandit.out
+            cat flake8.out
+             # Who am I?
+                    whoami
+                    hostname
+              
+            '''
+
+         recordIssues (
+    tools: [
+        flake8(name: 'Flake8', pattern: 'flake8.out'),
+        pyLint(name: 'Bandit', pattern: 'bandit.out')
+           ], enabledForFailure:true
+    
+         )
+}
+    }
+}
+
+        stage('Deploy') {
+             agent { label 'agente1' }
+            steps {
+                 unstash name: 'code'
+                sh '''
+                    aws sts get-caller-identity
+                    sam build
+                    sam validate --region us-east-1
+                   sam deploy --config-env staging \
+                --stack-name staging-todo-list-aws \
+                --region us-east-1 \
+                --resolve-s3 \
+                --capabilities CAPABILITY_IAM \
+                --no-disable-rollback \
+                --parameter-overrides Stage="staging" \
+                --save-params \
+                --no-confirm-changeset \
+                --no-fail-on-empty-changeset \
+                
+                  aws cloudformation describe-stacks \
+                    --stack-name staging-todo-list-aws \
+                    --region us-east-1 \
+                    --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue" \
+                    --output text > BASEURL.txt
+                    
+                 # Who am I?
+                    whoami
+                    hostname
+                     cat BASEURL.txt
+                '''
+                
+                   script {
+                    env.BASE_URL_API = readFile('BASEURL.txt').trim()
+                    echo "Base URL : ${env.BASE_URL_API}"
+                }
+         stash name: 'baseurl', includes: 'BASEURL.txt'
+                
+            }
+        }
+          
+ 
+        
+        stage('Rest Test') {
+        agent { label 'agente2' }
+           
+            steps {
+                 unstash name: 'code'
+                 unstash name: 'baseurl'
+                    script {
+                            def baseUrl = readFile('BASEURL.txt').trim()
+    echo "Base URL: ${baseUrl}"
+    env.BASE_URL = baseUrl
+                sh'''
+                   python3 -m venv venv
+                   . venv/bin/activate
+                    pip install pytest requests
+                 # export BASE_URL="${baseUrl}"
+                 #  // export BASE_URL=$(aws cloudformation describe-stacks --stack-name staging-todo-list-aws --query 'Stacks[0].Outputs[?OutputKey==`BaseUrlApi`].OutputValue' --region us-east-1 --output text)
+                   echo $BASE_URL
+                  
+                   echo "Ejecutando pruebas de integración..."
+                    pytest --junitxml=result-rest.xml test/integration/todoApiTest.py
+                    
+                     # Who am I?
+                    whoami
+                    hostname
+                  '''
+                    }
+                   junit 'result-rest.xml'
+                  
+              
+            }
+        }
+ 
+stage('Promote') {
+     agent { label 'agente1' }
+    steps {
+         unstash name: 'code'
+        
+         
+        withCredentials([string(credentialsId: 'GitTOKEN', variable: 'GITHUB_TOKEN')]) {
+
+            sh '''
+             # Who am I?
+                    whoami
+                    hostname
+                git config --global user.email "admin@admin.net"
+                git config --global user.name "admin"
+                git fetch origin
+               
+                git reset --hard
+                git checkout master
+                git pull origin master
+
+                git merge origin/develop -m "merge develop a master PRUEBAS AGENTES"
+
+                git push https://${GITHUB_TOKEN}@github.com/Anripasper/todo-list-aws.git  master
+                
+            '''
+        }
+    }
+}
+        
+    }}
