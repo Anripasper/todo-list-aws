@@ -4,8 +4,9 @@ pipeline {
 
         stage('Get Code') {
             steps {
-               echo '---- LIMPIEZA PREVIA ----'
+               echo '---- LIMPIEZA ----'
                cleanWs()
+			   echo '---- CÓDIGO ----'
                git branch: 'develop',
                url: 'https://github.com/Anripasper/todo-list-aws.git',
                credentialsId: 'GitTOKEN'
@@ -15,10 +16,11 @@ pipeline {
     stage('Set Environment') {
     steps {
         sh '''
-            echo "==== CREATING VENV ===="
+            echo "==== CREAR VENV ===="
             python3 -m venv venv
 
             . venv/bin/activate
+			echo '---- INSTALACIÓN ----'
             pip install --upgrade pip
             pip install flake8 bandit 
             pip install pytest requests
@@ -32,7 +34,7 @@ stage('Static Test') {
         sh '''
             echo "==== STATIC TEST ===="
 
-            # ACTIVAR EL VENV DE NUEVO (OBLIGATORIO EN OTRO STAGE)
+            echo '---- activar venv----'
             . venv/bin/activate
 
             export PYTHONPATH=$WORKSPACE
@@ -70,6 +72,8 @@ stage('Static Test') {
             
             steps {
                 sh '''
+				echo '---- DEPLOY ----'
+				
                     aws sts get-caller-identity
                     sam build
                     sam validate --region us-east-1
@@ -91,15 +95,17 @@ stage('Static Test') {
         
         stage('Rest Test') {
         
-            //BASE URL issue
+            
             steps {
                 sh'''
+				echo '---- REST TEST ----'
+				echo '---- activar VENV ----'
                    python3 -m venv .venv
                    . venv/bin/activate
                    export BASE_URL=$(aws cloudformation describe-stacks --stack-name staging-todo-list-aws --query 'Stacks[0].Outputs[?OutputKey==`BaseUrlApi`].OutputValue' --region us-east-1 --output text)
                    echo $BASE_URL
                   
-                   echo "Ejecutando pruebas de integración..."
+                   echo '----PYTEST----'
                     pytest --junitxml=result-rest.xml test/integration/todoApiTest.py
                   '''
                    junit 'result-rest.xml'
@@ -112,14 +118,16 @@ stage('Promote') {
         withCredentials([string(credentialsId: 'GitTOKEN', variable: 'GITHUB_TOKEN')]) {
 
             sh '''
+			echo '---- MERGE DEVELOP TO MASTER ----'
                 git config --global user.email "admin@admin.net"
                 git config --global user.name "admin"
-´               git fetch origin
-
+                git fetch origin
+               
+                git reset --hard
                 git checkout master
                 git pull origin master
 
-                git merge origin/develop --no-edit
+                git merge origin/develop -m "merge develop a master"
 
                 git push https://${GITHUB_TOKEN}@github.com/Anripasper/todo-list-aws.git  master
             '''
