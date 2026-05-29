@@ -41,7 +41,7 @@ stage('Static Test') {
 
             echo "==== FLAKE8 ===="
             flake8 --exit-zero --format=pylint src > flake8.out  || true
-             # si no hay errores, crear archivo válido vacío (pero NO vacío de verdad)
+         
             if [ ! -s flake8.out ]; then
               echo "" > flake8.out
               fi
