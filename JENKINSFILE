@@ -4,10 +4,8 @@ pipeline {
 
         stage('Get Code') {
             steps {
-               echo '---- LIMPIEZA ----'
-               cleanWs()
-			   echo '---- CÓDIGO ----'
-               git branch: 'develop',
+               
+               git branch: 'master',
                url: 'https://github.com/Anripasper/todo-list-aws.git',
                credentialsId: 'GitTOKEN'
 
@@ -16,11 +14,11 @@ pipeline {
     stage('Set Environment') {
     steps {
         sh '''
+             python3 -m venv .venv
             echo "==== CREAR VENV ===="
             python3 -m venv venv
 
             . venv/bin/activate
-			echo '---- INSTALACIÓN ----'
             pip install --upgrade pip
             pip install flake8 bandit 
             pip install pytest requests
@@ -28,62 +26,20 @@ pipeline {
     }
 }
 
-stage('Static Test') {
-    steps {
-        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-        sh '''
-            echo "==== STATIC TEST ===="
-
-            echo '---- activar venv----'
-            . venv/bin/activate
-
-            export PYTHONPATH=$WORKSPACE
-
-            echo "==== FLAKE8 ===="
-            flake8 --exit-zero --format=pylint src > flake8.out  || true
-         
-            if [ ! -s flake8.out ]; then
-              echo "" > flake8.out
-              fi
-
-            echo "==== BANDIT ===="
-            bandit --exit-zero -r src \
-                -f json \
-                -o bandit.out 
-            echo "==== CONTENIDO BANDIT ===="
-               cat bandit.out
-            cat flake8.out
-            
-              
-            '''
-
-         recordIssues (
-    tools: [
-        flake8(name: 'Flake8', pattern: 'flake8.out'),
-        pyLint(name: 'Bandit', pattern: 'bandit.out')
-           ], enabledForFailure:true
-    
-         )
-}
-    }
-}
-
         stage('Deploy') {
             
             steps {
                 sh '''
-				echo '---- DEPLOY ----'
-				
                     aws sts get-caller-identity
                     sam build
                     sam validate --region us-east-1
-                   sam deploy --config-env staging \
-                --stack-name staging-todo-list-aws \
+                   sam deploy --config-env production \
+                --stack-name production-todo-list-aws \
                 --region us-east-1 \
                 --resolve-s3 \
                 --capabilities CAPABILITY_IAM \
                 --no-disable-rollback \
-                --parameter-overrides Stage="staging" \
+                --parameter-overrides Stage="production" \
                 --save-params \
                 --no-confirm-changeset \
                 --no-fail-on-empty-changeset \
@@ -94,45 +50,19 @@ stage('Static Test') {
  
         
         stage('Rest Test') {
-        
-            
             steps {
                 sh'''
-				echo '---- REST TEST ----'
-				echo '---- activar VENV ----'
-                   python3 -m venv .venv
+               
                    . venv/bin/activate
-                   export BASE_URL=$(aws cloudformation describe-stacks --stack-name staging-todo-list-aws --query 'Stacks[0].Outputs[?OutputKey==`BaseUrlApi`].OutputValue' --region us-east-1 --output text)
+                   export BASE_URL=$(aws cloudformation describe-stacks --stack-name production-todo-list-aws --query 'Stacks[0].Outputs[?OutputKey==`BaseUrlApi`].OutputValue' --region us-east-1 --output text)
                    echo $BASE_URL
                   
-                   echo '----PYTEST----'
-                    pytest --junitxml=result-rest.xml test/integration/todoApiTest.py
+                   echo "-------ejecutar pruebas----------"
+                    pytest --junitxml=result-rest.xml test/integration/todoApiTest.py -k 'test_api_listtodos or test_api_gettodo'
                   '''
                    junit 'result-rest.xml'
-              
+             
             }
         }
- 
-stage('Promote') {
-    steps {
-        withCredentials([string(credentialsId: 'GitTOKEN', variable: 'GITHUB_TOKEN')]) {
-
-            sh '''
-			echo '---- MERGE DEVELOP TO MASTER ----'
-                git config --global user.email "admin@admin.net"
-                git config --global user.name "admin"
-                git fetch origin
-               
-                git reset --hard
-                git checkout master
-                git pull origin master
-
-                git merge origin/develop -m "merge develop a master"
-
-                git push https://${GITHUB_TOKEN}@github.com/Anripasper/todo-list-aws.git  master
-            '''
-        }
-    }
-}
         
     }}
